@@ -456,7 +456,7 @@ export default function DashboardPage() {
                           <CardDescription className="mt-2">
                             <span className="flex items-center gap-2">
                               <CalendarDays className="h-4 w-4" />
-                              {new Date(event.date).toLocaleDateString('es-MX', { dateStyle: 'full', timeStyle: 'short' })}
+                              {new Date(event.date).toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </span>
                             <span className="flex items-center gap-2 mt-1">
                               <span>📍</span>
