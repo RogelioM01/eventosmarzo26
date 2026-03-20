@@ -173,6 +173,108 @@ async function handleRoute(request, { params }) {
       }))
     }
 
+    // ==================== OPEN REGISTRATION ====================
+
+    // Get event info for open registration
+    if (route.match(/^\/public\/event\/[^/]+$/) && method === 'GET') {
+      const eventId = path[2]
+      
+      const event = await prisma.event.findUnique({
+        where: { id: eventId },
+        include: {
+          host: { select: { name: true } }
+        }
+      })
+
+      if (!event) {
+        return handleCORS(NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 }))
+      }
+
+      if (!event.openRegistration) {
+        return handleCORS(NextResponse.json({ error: 'El registro abierto no está habilitado para este evento' }, { status: 403 }))
+      }
+
+      return handleCORS(NextResponse.json({
+        id: event.id,
+        name: event.name,
+        date: event.date,
+        location: event.location,
+        locationUrl: event.locationUrl,
+        description: event.description,
+        maxPassesPerGuest: event.maxPassesPerGuest,
+        giftRegistry: event.giftRegistry ? JSON.parse(event.giftRegistry) : null,
+        hostName: event.host.name
+      }))
+    }
+
+    // Open registration - Submit new guest
+    if (route.match(/^\/public\/event\/[^/]+\/register$/) && method === 'POST') {
+      const eventId = path[2]
+      const body = await request.json()
+      const { name, passes, phone, email, dietaryNotes, songRequest } = body
+
+      if (!name || !passes) {
+        return handleCORS(NextResponse.json({ error: 'Nombre y número de pases son requeridos' }, { status: 400 }))
+      }
+
+      const event = await prisma.event.findUnique({
+        where: { id: eventId }
+      })
+
+      if (!event) {
+        return handleCORS(NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 }))
+      }
+
+      if (!event.openRegistration) {
+        return handleCORS(NextResponse.json({ error: 'El registro abierto no está habilitado' }, { status: 403 }))
+      }
+
+      if (passes > event.maxPassesPerGuest) {
+        return handleCORS(NextResponse.json({ 
+          error: `El máximo de pases permitido es ${event.maxPassesPerGuest}` 
+        }, { status: 400 }))
+      }
+
+      if (passes < 1) {
+        return handleCORS(NextResponse.json({ error: 'Debe asistir al menos 1 persona' }, { status: 400 }))
+      }
+
+      // Create guest with confirmed status
+      const guest = await prisma.guest.create({
+        data: {
+          name,
+          email: email || null,
+          phone: phone || null,
+          passes: passes,
+          confirmedPasses: passes,
+          status: 'confirmed',
+          dietaryNotes: dietaryNotes || null,
+          songRequest: songRequest || null,
+          confirmedAt: new Date(),
+          eventId,
+          token: uuidv4()
+        },
+        include: { event: true }
+      })
+
+      return handleCORS(NextResponse.json({
+        success: true,
+        message: '¡Registro exitoso!',
+        guest: {
+          id: guest.id,
+          name: guest.name,
+          passes: guest.passes,
+          token: guest.token
+        },
+        event: {
+          name: guest.event.name,
+          date: guest.event.date,
+          location: guest.event.location,
+          locationUrl: guest.event.locationUrl
+        }
+      }))
+    }
+
     // ==================== SEED ====================
     if (route === '/seed' && method === 'POST') {
       // Create admin user
@@ -371,7 +473,7 @@ async function handleRoute(request, { params }) {
       if (!authUser) return handleCORS(NextResponse.json({ error: 'No autorizado' }, { status: 401 }))
 
       const body = await request.json()
-      const { name, date, location, locationUrl, giftRegistry, description } = body
+      const { name, date, location, locationUrl, giftRegistry, description, openRegistration, maxPassesPerGuest } = body
 
       if (!name || !date || !location) {
         return handleCORS(NextResponse.json({ error: 'Nombre, fecha y lugar son requeridos' }, { status: 400 }))
@@ -385,6 +487,8 @@ async function handleRoute(request, { params }) {
           locationUrl: locationUrl || null,
           giftRegistry: giftRegistry ? JSON.stringify(giftRegistry) : null,
           description: description || null,
+          openRegistration: openRegistration || false,
+          maxPassesPerGuest: maxPassesPerGuest || 4,
           hostId: authUser.id
         }
       })
@@ -423,7 +527,9 @@ async function handleRoute(request, { params }) {
           location: body.location,
           locationUrl: body.locationUrl,
           giftRegistry: body.giftRegistry ? JSON.stringify(body.giftRegistry) : undefined,
-          description: body.description
+          description: body.description,
+          openRegistration: body.openRegistration !== undefined ? body.openRegistration : undefined,
+          maxPassesPerGuest: body.maxPassesPerGuest !== undefined ? body.maxPassesPerGuest : undefined
         }
       })
 

@@ -18,8 +18,9 @@ import { toast } from 'sonner'
 import { 
   Sparkles, Users, CalendarDays, CheckCircle, XCircle, Clock, Plus, 
   Trash2, Edit2, MessageSquare, Download, Copy, ExternalLink, LogOut,
-  QrCode, Link2, Share2, Settings, UserPlus
+  QrCode, Link2, Share2, Settings, UserPlus, Globe, Lock
 } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
 
 export default function HostDashboard() {
   const { data: session, status } = useSession()
@@ -31,14 +32,17 @@ export default function HostDashboard() {
   const [showEventDialog, setShowEventDialog] = useState(false)
   const [showGuestDialog, setShowGuestDialog] = useState(false)
   const [showQRDialog, setShowQRDialog] = useState(false)
+  const [showOpenRegDialog, setShowOpenRegDialog] = useState(false)
   const [selectedGuestForQR, setSelectedGuestForQR] = useState(null)
   const [editingEvent, setEditingEvent] = useState(null)
   const [editingGuest, setEditingGuest] = useState(null)
   const qrRef = useRef(null)
+  const openRegQrRef = useRef(null)
 
   const [eventForm, setEventForm] = useState({
     name: '', date: '', location: '', locationUrl: '', description: '',
-    giftRegistry: { amazon: '', liverpool: '', bank: '' }
+    giftRegistry: { amazon: '', liverpool: '', bank: '' },
+    openRegistration: false, maxPassesPerGuest: 4
   })
   const [guestForm, setGuestForm] = useState({
     name: '', email: '', phone: '', passes: 1
@@ -213,7 +217,7 @@ export default function HostDashboard() {
   }
 
   const resetEventForm = () => {
-    setEventForm({ name: '', date: '', location: '', locationUrl: '', description: '', giftRegistry: { amazon: '', liverpool: '', bank: '' } })
+    setEventForm({ name: '', date: '', location: '', locationUrl: '', description: '', giftRegistry: { amazon: '', liverpool: '', bank: '' }, openRegistration: false, maxPassesPerGuest: 4 })
   }
 
   const openEditEvent = () => {
@@ -226,9 +230,43 @@ export default function HostDashboard() {
       location: selectedEvent.location,
       locationUrl: selectedEvent.locationUrl || '',
       description: selectedEvent.description || '',
-      giftRegistry: registry
+      giftRegistry: registry,
+      openRegistration: selectedEvent.openRegistration || false,
+      maxPassesPerGuest: selectedEvent.maxPassesPerGuest || 4
     })
     setShowEventDialog(true)
+  }
+
+  const handleCopyOpenRegLink = async () => {
+    if (!selectedEvent) return
+    const link = `${baseUrl}/evento/${selectedEvent.id}/registro`
+    await navigator.clipboard.writeText(link)
+    toast.success('Enlace de registro abierto copiado')
+  }
+
+  const handleDownloadOpenRegQR = () => {
+    if (!openRegQrRef.current || !selectedEvent) return
+    
+    const svg = openRegQrRef.current.querySelector('svg')
+    const svgData = new XMLSerializer().serializeToString(svg)
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    const img = new Image()
+    
+    img.onload = () => {
+      canvas.width = img.width
+      canvas.height = img.height
+      ctx.fillStyle = 'white'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0)
+      
+      const a = document.createElement('a')
+      a.download = `qr-registro-${selectedEvent.name.replace(/\s+/g, '-')}.png`
+      a.href = canvas.toDataURL('image/png')
+      a.click()
+    }
+    
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
   }
 
   const openEditGuest = (guest) => {
@@ -388,6 +426,54 @@ export default function HostDashboard() {
                   </Button>
                 </CardContent>
               </Card>
+
+              {/* Open Registration Card */}
+              {selectedEvent && (
+                <Card className={selectedEvent.openRegistration ? 'border-green-200 bg-green-50/50' : ''}>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        {selectedEvent.openRegistration ? (
+                          <Globe className="h-4 w-4 text-green-600" />
+                        ) : (
+                          <Lock className="h-4 w-4 text-stone-400" />
+                        )}
+                        Registro Abierto
+                      </CardTitle>
+                      <Badge variant={selectedEvent.openRegistration ? 'default' : 'secondary'} className="text-xs">
+                        {selectedEvent.openRegistration ? 'Activo' : 'Inactivo'}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {selectedEvent.openRegistration ? (
+                      <>
+                        <p className="text-xs text-stone-600">
+                          Comparte este enlace para que cualquier persona pueda registrarse 
+                          (máx. {selectedEvent.maxPassesPerGuest} pases por registro)
+                        </p>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" className="flex-1" onClick={handleCopyOpenRegLink}>
+                            <Copy className="h-3 w-3 mr-1" />
+                            Copiar Link
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => setShowOpenRegDialog(true)}>
+                            <QrCode className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-xs text-stone-500">
+                        Activa esta opción en la configuración del evento para permitir que personas no registradas confirmen su asistencia.
+                      </p>
+                    )}
+                    <Button variant="ghost" size="sm" className="w-full text-xs" onClick={openEditEvent}>
+                      <Settings className="h-3 w-3 mr-1" />
+                      Configurar
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
             </div>
 
             {/* Main Content - Guest List */}
@@ -555,6 +641,39 @@ export default function HostDashboard() {
                 />
               </div>
             </div>
+            {/* Open Registration Section */}
+            <div className="border-t pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <Label className="text-base font-medium flex items-center gap-2">
+                    <Globe className="h-4 w-4" />
+                    Registro Abierto
+                  </Label>
+                  <p className="text-xs text-stone-500 mt-1">
+                    Permite que personas no registradas confirmen su asistencia
+                  </p>
+                </div>
+                <Switch
+                  checked={eventForm.openRegistration}
+                  onCheckedChange={(checked) => setEventForm({...eventForm, openRegistration: checked})}
+                />
+              </div>
+              {eventForm.openRegistration && (
+                <div className="grid gap-2 bg-green-50 p-3 rounded-lg">
+                  <Label className="text-sm">Máximo de pases por registro</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={eventForm.maxPassesPerGuest}
+                    onChange={(e) => setEventForm({...eventForm, maxPassesPerGuest: parseInt(e.target.value) || 4})}
+                  />
+                  <p className="text-xs text-stone-500">
+                    Límite de personas que puede registrar cada invitado no pre-registrado
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEventDialog(false)}>Cancelar</Button>
@@ -641,6 +760,50 @@ export default function HostDashboard() {
               Copiar Enlace
             </Button>
             <Button className="w-full" onClick={handleDownloadQR}>
+              <Download className="h-4 w-4 mr-2" />
+              Descargar QR
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Open Registration QR Dialog */}
+      <Dialog open={showOpenRegDialog} onOpenChange={setShowOpenRegDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-center">Código QR - Registro Abierto</DialogTitle>
+            <DialogDescription className="text-center">
+              {selectedEvent?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center py-6" ref={openRegQrRef}>
+            {selectedEvent && (
+              <QRCodeSVG 
+                value={`${baseUrl}/evento/${selectedEvent.id}/registro`}
+                size={200}
+                level="H"
+                includeMargin={true}
+              />
+            )}
+            <div className="mt-4 p-3 bg-green-50 rounded-lg w-full">
+              <p className="text-xs text-green-700 text-center mb-2">
+                <Globe className="h-4 w-4 inline mr-1" />
+                Registro abierto para cualquier persona
+              </p>
+              <p className="text-xs text-stone-600 text-center">
+                Máx. {selectedEvent?.maxPassesPerGuest} pases por registro
+              </p>
+            </div>
+            <p className="text-xs text-stone-500 mt-4 text-center break-all px-4">
+              {selectedEvent && `${baseUrl}/evento/${selectedEvent.id}/registro`}
+            </p>
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" className="w-full" onClick={handleCopyOpenRegLink}>
+              <Copy className="h-4 w-4 mr-2" />
+              Copiar Enlace
+            </Button>
+            <Button className="w-full" onClick={handleDownloadOpenRegQR}>
               <Download className="h-4 w-4 mr-2" />
               Descargar QR
             </Button>

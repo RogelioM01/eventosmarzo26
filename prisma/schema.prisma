@@ -22,18 +22,20 @@ model User {
 }
 
 model Event {
-  id              String    @id @default(cuid())
-  name            String
-  date            DateTime
-  location        String
-  locationUrl     String?   // Google Maps link
-  giftRegistry    String?   // JSON with registry info
-  description     String?
-  hostId          String
-  host            User      @relation(fields: [hostId], references: [id], onDelete: Cascade)
-  guests          Guest[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                    String    @id @default(cuid())
+  name                  String
+  date                  DateTime
+  location              String
+  locationUrl           String?   // Google Maps link
+  giftRegistry          String?   // JSON with registry info
+  description           String?
+  openRegistration      Boolean   @default(false)  // Allow open registration
+  maxPassesPerGuest     Int       @default(4)      // Max passes per unregistered guest
+  hostId                String
+  host                  User      @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  guests                Guest[]
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@map("events")
 }
