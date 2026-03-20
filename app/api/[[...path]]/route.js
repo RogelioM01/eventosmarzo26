@@ -25,6 +25,11 @@ async function getAuthUser() {
   return session?.user || null
 }
 
+// Check if user is admin
+function isAdmin(user) {
+  return user?.role === 'admin'
+}
+
 // Route handler function
 async function handleRoute(request, { params }) {
   const { path = [] } = params
@@ -52,7 +57,6 @@ async function handleRoute(request, { params }) {
       const usedMem = totalMem - freeMem
       const uptime = os.uptime()
 
-      // Calculate CPU usage
       let totalIdle = 0
       let totalTick = 0
       cpus.forEach(cpu => {
@@ -64,11 +68,7 @@ async function handleRoute(request, { params }) {
       const cpuUsage = Math.round((1 - totalIdle / totalTick) * 100)
 
       const metrics = {
-        cpu: {
-          usage: cpuUsage,
-          cores: cpus.length,
-          model: cpus[0]?.model || 'Unknown'
-        },
+        cpu: { usage: cpuUsage, cores: cpus.length, model: cpus[0]?.model || 'Unknown' },
         memory: {
           total: Math.round(totalMem / 1024 / 1024),
           used: Math.round(usedMem / 1024 / 1024),
@@ -103,9 +103,7 @@ async function handleRoute(request, { params }) {
         include: {
           event: {
             include: {
-              host: {
-                select: { name: true, email: true }
-              }
+              host: { select: { name: true, email: true } }
             }
           }
         }
@@ -144,9 +142,7 @@ async function handleRoute(request, { params }) {
       const body = await request.json()
       const { confirmed, confirmedPasses, dietaryNotes, songRequest } = body
 
-      const guest = await prisma.guest.findUnique({
-        where: { token }
-      })
+      const guest = await prisma.guest.findUnique({ where: { token } })
 
       if (!guest) {
         return handleCORS(NextResponse.json({ error: 'Invitación no encontrada' }, { status: 404 }))
@@ -167,9 +163,7 @@ async function handleRoute(request, { params }) {
           songRequest: songRequest || null,
           confirmedAt: new Date()
         },
-        include: {
-          event: true
-        }
+        include: { event: true }
       })
 
       return handleCORS(NextResponse.json({
@@ -179,14 +173,22 @@ async function handleRoute(request, { params }) {
       }))
     }
 
-    // ==================== SEED DEFAULT USER ====================
+    // ==================== SEED ====================
     if (route === '/seed' && method === 'POST') {
-      const existingUser = await prisma.user.findUnique({
+      // Create admin user
+      const existingAdmin = await prisma.user.findUnique({
         where: { email: process.env.DEFAULT_HOST_EMAIL }
       })
 
-      if (existingUser) {
-        return handleCORS(NextResponse.json({ message: 'Usuario ya existe', userId: existingUser.id }))
+      if (existingAdmin) {
+        // Update to admin if not already
+        if (existingAdmin.role !== 'admin') {
+          await prisma.user.update({
+            where: { id: existingAdmin.id },
+            data: { role: 'admin' }
+          })
+        }
+        return handleCORS(NextResponse.json({ message: 'Usuario admin actualizado', userId: existingAdmin.id }))
       }
 
       const passwordHash = await bcrypt.hash(process.env.DEFAULT_HOST_PASSWORD, 10)
@@ -195,15 +197,147 @@ async function handleRoute(request, { params }) {
           email: process.env.DEFAULT_HOST_EMAIL,
           name: 'Administrador',
           passwordHash,
-          role: 'host'
+          role: 'admin'
         }
       })
 
-      return handleCORS(NextResponse.json({ message: 'Usuario creado', userId: user.id }))
+      return handleCORS(NextResponse.json({ message: 'Usuario admin creado', userId: user.id }))
     }
 
     // ==================== PROTECTED ROUTES ====================
     const authUser = await getAuthUser()
+
+    // ==================== ADMIN ROUTES ====================
+
+    // Get all users (Admin only)
+    if (route === '/admin/users' && method === 'GET') {
+      if (!authUser) return handleCORS(NextResponse.json({ error: 'No autorizado' }, { status: 401 }))
+      if (!isAdmin(authUser)) return handleCORS(NextResponse.json({ error: 'Acceso denegado' }, { status: 403 }))
+
+      const users = await prisma.user.findMany({
+        include: {
+          _count: { select: { events: true } },
+          events: {
+            include: {
+              _count: { select: { guests: true } }
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' }
+      })
+
+      const usersWithStats = users.map(user => ({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        createdAt: user.createdAt,
+        eventsCount: user._count.events,
+        totalGuests: user.events.reduce((sum, e) => sum + e._count.guests, 0)
+      }))
+
+      return handleCORS(NextResponse.json(usersWithStats))
+    }
+
+    // Create new user (Admin only)
+    if (route === '/admin/users' && method === 'POST') {
+      if (!authUser) return handleCORS(NextResponse.json({ error: 'No autorizado' }, { status: 401 }))
+      if (!isAdmin(authUser)) return handleCORS(NextResponse.json({ error: 'Acceso denegado' }, { status: 403 }))
+
+      const body = await request.json()
+      const { email, name, password, role } = body
+
+      if (!email || !password) {
+        return handleCORS(NextResponse.json({ error: 'Email y contraseña son requeridos' }, { status: 400 }))
+      }
+
+      const existingUser = await prisma.user.findUnique({ where: { email } })
+      if (existingUser) {
+        return handleCORS(NextResponse.json({ error: 'El email ya está registrado' }, { status: 400 }))
+      }
+
+      const passwordHash = await bcrypt.hash(password, 10)
+      const newUser = await prisma.user.create({
+        data: {
+          email,
+          name: name || email.split('@')[0],
+          passwordHash,
+          role: role || 'host'
+        }
+      })
+
+      return handleCORS(NextResponse.json({ 
+        id: newUser.id, 
+        email: newUser.email, 
+        name: newUser.name,
+        role: newUser.role 
+      }))
+    }
+
+    // Update user (Admin only)
+    if (route.match(/^\/admin\/users\/[^/]+$/) && method === 'PUT') {
+      if (!authUser) return handleCORS(NextResponse.json({ error: 'No autorizado' }, { status: 401 }))
+      if (!isAdmin(authUser)) return handleCORS(NextResponse.json({ error: 'Acceso denegado' }, { status: 403 }))
+
+      const userId = path[2]
+      const body = await request.json()
+
+      const updateData = {}
+      if (body.name) updateData.name = body.name
+      if (body.email) updateData.email = body.email
+      if (body.role) updateData.role = body.role
+      if (body.password) updateData.passwordHash = await bcrypt.hash(body.password, 10)
+
+      const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: updateData
+      })
+
+      return handleCORS(NextResponse.json({ 
+        id: updatedUser.id, 
+        email: updatedUser.email, 
+        name: updatedUser.name,
+        role: updatedUser.role 
+      }))
+    }
+
+    // Delete user (Admin only)
+    if (route.match(/^\/admin\/users\/[^/]+$/) && method === 'DELETE') {
+      if (!authUser) return handleCORS(NextResponse.json({ error: 'No autorizado' }, { status: 401 }))
+      if (!isAdmin(authUser)) return handleCORS(NextResponse.json({ error: 'Acceso denegado' }, { status: 403 }))
+
+      const userId = path[2]
+      
+      if (userId === authUser.id) {
+        return handleCORS(NextResponse.json({ error: 'No puedes eliminarte a ti mismo' }, { status: 400 }))
+      }
+
+      await prisma.user.delete({ where: { id: userId } })
+      return handleCORS(NextResponse.json({ success: true }))
+    }
+
+    // Admin stats
+    if (route === '/admin/stats' && method === 'GET') {
+      if (!authUser) return handleCORS(NextResponse.json({ error: 'No autorizado' }, { status: 401 }))
+      if (!isAdmin(authUser)) return handleCORS(NextResponse.json({ error: 'Acceso denegado' }, { status: 403 }))
+
+      const [usersCount, eventsCount, guestsCount] = await Promise.all([
+        prisma.user.count(),
+        prisma.event.count(),
+        prisma.guest.count()
+      ])
+
+      const confirmedGuests = await prisma.guest.count({ where: { status: 'confirmed' } })
+
+      return handleCORS(NextResponse.json({
+        totalUsers: usersCount,
+        totalEvents: eventsCount,
+        totalGuests: guestsCount,
+        confirmedGuests
+      }))
+    }
+
+    // ==================== HOST ROUTES ====================
 
     // Events CRUD
     if (route === '/events' && method === 'GET') {
@@ -218,7 +352,6 @@ async function handleRoute(request, { params }) {
         orderBy: { date: 'asc' }
       })
 
-      // Add stats to each event
       const eventsWithStats = events.map(event => ({
         ...event,
         stats: {

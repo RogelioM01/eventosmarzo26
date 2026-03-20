@@ -35,8 +35,8 @@ export default function LoginPage() {
         toast.error('Error al iniciar sesión')
       } else {
         toast.success('¡Bienvenido!')
-        router.push('/dashboard')
-        router.refresh()
+        // Wait for session to update and then redirect
+        window.location.href = '/dashboard'
       }
     } catch (err) {
       setError('Error al conectar con el servidor')
