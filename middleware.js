@@ -5,7 +5,7 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth
   const userRole = req.auth?.user?.role
   const pathname = req.nextUrl.pathname
-  
+
   const isOnDashboard = pathname.startsWith('/dashboard')
   const isOnAdmin = pathname.startsWith('/admin')
   const isOnLogin = pathname === '/login'
@@ -44,3 +44,5 @@ export default auth((req) => {
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\..*).*)'],
 }
+
+export const runtime = 'nodejs'
